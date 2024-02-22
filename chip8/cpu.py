@@ -12,7 +12,7 @@ from .memory import MEMORY_START_ROM, Memory
 from .sound import Sound
 from .utils import display_bytes, read_address, read_byte, read_half_byte
 
-TICKS_PER_SECOND = 1000
+TICKS_PER_SECOND = 200
 
 
 class CPU:
@@ -40,6 +40,8 @@ class CPU:
                 self.sound.play(-1)
                 self.running = False
             self.execute(operation)
+            if self.register_DT > 0:
+                self.register_DT -= np.uint8(1)
             time.sleep(1 / TICKS_PER_SECOND)
 
     def fetch(self) -> np.uint16:
@@ -55,6 +57,10 @@ class CPU:
             case ("0", "0", "e", "e"):
                 # 00EE - RET                                - Return from a subroutine.
                 self.register_PC = self.stack.pop()
+                self.register_PC += np.uint16(2)
+            case ("0", *_):
+                # 0nnn - SYS addr                           - Jump to a machine code routine at nnn.
+                logging.warning("Ignore old instruction 0nnn")
                 self.register_PC += np.uint16(2)
             case ("1", *_):
                 # 1nnn - JP addr                            - Jump to location nnn.
@@ -97,11 +103,25 @@ class CPU:
                 value_2 = self.get_register(vy)
                 self.set_register(vx, value_2)
                 self.register_PC += np.uint16(2)
+            case ("8", vx, vy, "1"):
+                # 8xy2 - OR Vx, Vy                         - Set Vx = Vx OR Vy.
+                value_1 = self.get_register(vx)
+                value_2 = self.get_register(vy)
+                value = value_1 | value_2
+                self.set_register(vx, value)
+                self.register_PC += np.uint16(2)
             case ("8", vx, vy, "2"):
                 # 8xy2 - AND Vx, Vy                         - Set Vx = Vx AND Vy.
                 value_1 = self.get_register(vx)
                 value_2 = self.get_register(vy)
                 value = value_1 & value_2
+                self.set_register(vx, value)
+                self.register_PC += np.uint16(2)
+            case ("8", vx, vy, "3"):
+                # 8xy3 - XOR Vx, Vy                       - Set Vx = Vx XOR Vy.
+                value_1 = self.get_register(vx)
+                value_2 = self.get_register(vy)
+                value = value_1 ^ value_2
                 self.set_register(vx, value)
                 self.register_PC += np.uint16(2)
             case ("8", vx, vy, "4"):
@@ -115,6 +135,17 @@ class CPU:
                     self.set_register("f", np.uint8(0))
                 self.set_register(vx, value)
                 self.register_PC += np.uint16(2)
+            case ("8", vx, vy, "5"):
+                # 8xy5 - SUB Vx, Vy                         - Set Vx = Vx - Vy, set VF = NOT borrow.
+                value_1 = self.get_register(vx)
+                value_2 = self.get_register(vy)
+                value = value_1 - value_2
+                if int(value_1) > int(value_2):
+                    self.set_register("f", np.uint8(1))
+                else:
+                    self.set_register("f", np.uint8(0))
+                self.set_register(vx, value)
+                self.register_PC += np.uint16(2)
             case ("8", vx, _, "6"):
                 # 8xy6 - SHR Vx {, Vy}                      - Set Vx = Vx SHR 1.
                 value = self.get_register(vx)
@@ -123,6 +154,17 @@ class CPU:
                 else:
                     self.set_register("f", np.uint8(0))
                 value //= 2
+                self.set_register(vx, value)
+                self.register_PC += np.uint16(2)
+            case ("8", vx, vy, "7"):
+                # 8xy7 - SUBN Vx, Vy                        - Set Vx = Vy - Vx, set VF = NOT borrow.
+                value_1 = self.get_register(vx)
+                value_2 = self.get_register(vy)
+                value = value_2 - value_1
+                if int(value_2) > int(value_1):
+                    self.set_register("f", np.uint8(1))
+                else:
+                    self.set_register("f", np.uint8(0))
                 self.set_register(vx, value)
                 self.register_PC += np.uint16(2)
             case ("8", vx, _, "e"):
@@ -183,8 +225,7 @@ class CPU:
                 self.register_PC += np.uint16(2)
             case ("f", vx, "1", "5"):
                 # Fx15 - LD DT, Vx                          - Set delay timer = Vx.
-                # TODO: implement sound
-                logging.warning("Delay timer not implemented")
+                self.register_DT = self.get_register(vx)
                 self.register_PC += np.uint16(2)
             case ("f", vx, "1", "8"):
                 # Fx18 - LD ST, Vx                          - Set sound timer = Vx.
@@ -238,7 +279,8 @@ class CPU:
                 self.sound.play(-1)
                 self.running = False
             time.sleep(1 / TICKS_PER_SECOND)
-        return np.uint8(1)
+        val = next(iter(self.pressed_buttons))
+        return np.uint8(val)
 
     def set_register(self, reg: str, data: np.uint8) -> None:
         assert 0 <= data < 2**8
