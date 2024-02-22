@@ -86,5 +86,4 @@ disallow_untyped_defs = true
 show_error_codes = true
 ignore_missing_imports = true
 disallow_any_generics = true
-disallow_any_explicit = true
 disallow_any_unimported = false

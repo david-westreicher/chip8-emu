@@ -1,60 +1,43 @@
+# https://colineberhardt.github.io/wasm-rust-chip8/web/
+# http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
+
 import logging
 import random
 import time
 
-import keyboard
 import numpy as np
 
 from .display import Display
 from .memory import MEMORY_START_ROM, Memory
 from .utils import display_bytes, read_address, read_byte, read_half_byte
 
-# https://colineberhardt.github.io/wasm-rust-chip8/web/
-# http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
-
-
-KEY_MAP = {
-    0x00: "0",
-    0x01: "1",
-    0x02: "2",
-    0x03: "3",
-    0x04: "4",
-    0x05: "5",
-    0x06: "6",
-    0x07: "7",
-    0x08: "8",
-    0x09: "9",
-    0x0A: "a",
-    0x0B: "b",
-    0x0C: "c",
-    0x0D: "d",
-    0x0E: "e",
-}
-TICKS_PER_SECOND = 400
+TICKS_PER_SECOND = 1000
 
 
 class CPU:
     def __init__(self, memory: Memory, display: Display) -> None:
         self.memory = memory
         self.display = display
+        self.running = True
 
         self.data_registers = np.asarray([0] * 16, np.uint8)
         self.register_I = np.uint16(0)  # 12 bits
         self.register_DT = np.uint8(0)  # 12 bits
         self.register_PC = np.uint16(MEMORY_START_ROM)  # 12 bits
         self.stack: list[np.uint16] = []
-        self.cycles = 0
         np.seterr(over="ignore")
 
     def run(self) -> None:
-        while True:
+        while self.running:
             operation = self.fetch()
             logging.info(self)
             logging.info(("Operation", hex(operation)[2:].zfill(4)))
             self.display.show()
+            self.pressed_buttons = self.display.pressed_buttons()
+            if -1 in self.pressed_buttons:
+                self.running = False
             self.execute(operation)
             time.sleep(1 / TICKS_PER_SECOND)
-            self.cycles += 1
 
     def fetch(self) -> np.uint16:
         return self.memory.read_op(self.register_PC)
@@ -238,16 +221,18 @@ class CPU:
                 raise NotImplementedError(hex_repr)
 
     def is_pressed(self, key_num: np.uint8) -> bool:
-        # TODO: implement
-        return bool(keyboard.is_pressed(KEY_MAP[key_num]))
+        return bool(key_num in self.pressed_buttons)
 
     def get_register(self, reg: str) -> np.uint8:
         register_num = int(reg, 16)
         return self.data_registers[register_num]
 
     def wait_for_and_parse_input(self) -> np.uint8:
-        # TODO return correct character code
-        char = input()
+        while not self.pressed_buttons:
+            self.pressed_buttons = self.display.pressed_buttons()
+            if -1 in self.pressed_buttons:
+                self.running = False
+            time.sleep(1 / TICKS_PER_SECOND)
         return np.uint8(1)
 
     def set_register(self, reg: str, data: np.uint8) -> None:
@@ -256,4 +241,4 @@ class CPU:
         self.data_registers[register_num] = data
 
     def __str__(self) -> str:
-        return f"PC: {self.register_PC, hex(self.register_PC)}, I: {self.register_I}, regs: {display_bytes(self.data_registers)}"
+        return f"PC: {self.register_PC, hex(self.register_PC)}, I: {self.register_I}, regs: {display_bytes(self.data_registers)}"  # noqa: E501

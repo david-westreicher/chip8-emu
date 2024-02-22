@@ -1,10 +1,12 @@
 import numpy as np
 import numpy.typing as npt
 
+from .constants import HEIGHT, WIDTH
+
 
 class Display:
     def __init__(self) -> None:
-        self.screen = [[False for _ in range(64)] for _ in range(32)]
+        self.screen = [[False for _ in range(WIDTH)] for _ in range(HEIGHT)]
 
     def blit(self, x: np.uint8, y: np.uint8, graphic_data: npt.NDArray[np.uint8]) -> bool:
         erased = False
@@ -24,6 +26,9 @@ class Display:
 
     def show(self) -> None:
         print(self)  # noqa: T201
+
+    def pressed_buttons(self) -> set[int]:
+        return set()
 
     def __str__(self) -> str:
         lines = ["+" + "".join("█" if e else " " for e in row) + "+" for row in self.screen]
