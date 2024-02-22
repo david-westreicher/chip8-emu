@@ -9,15 +9,17 @@ import numpy as np
 
 from .display import Display
 from .memory import MEMORY_START_ROM, Memory
+from .sound import Sound
 from .utils import display_bytes, read_address, read_byte, read_half_byte
 
 TICKS_PER_SECOND = 1000
 
 
 class CPU:
-    def __init__(self, memory: Memory, display: Display) -> None:
+    def __init__(self, memory: Memory, display: Display, sound: Sound) -> None:
         self.memory = memory
         self.display = display
+        self.sound = sound
         self.running = True
 
         self.data_registers = np.asarray([0] * 16, np.uint8)
@@ -35,6 +37,7 @@ class CPU:
             self.display.show()
             self.pressed_buttons = self.display.pressed_buttons()
             if -1 in self.pressed_buttons:
+                self.sound.play(-1)
                 self.running = False
             self.execute(operation)
             time.sleep(1 / TICKS_PER_SECOND)
@@ -185,8 +188,9 @@ class CPU:
                 self.register_PC += np.uint16(2)
             case ("f", vx, "1", "8"):
                 # Fx18 - LD ST, Vx                          - Set sound timer = Vx.
-                # TODO: implement sound
-                logging.warning("Sound timer not implemented")
+                # TODO: implement sound correctly
+                value = self.get_register(vx)
+                self.sound.play(int(value))
                 self.register_PC += np.uint16(2)
             case ("f", vx, "1", "e"):
                 # Fx1E - ADD I, Vx                          - Set I = I + Vx.
@@ -231,6 +235,7 @@ class CPU:
         while not self.pressed_buttons:
             self.pressed_buttons = self.display.pressed_buttons()
             if -1 in self.pressed_buttons:
+                self.sound.play(-1)
                 self.running = False
             time.sleep(1 / TICKS_PER_SECOND)
         return np.uint8(1)

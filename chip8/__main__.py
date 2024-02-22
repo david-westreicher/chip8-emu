@@ -6,6 +6,7 @@ from .cpu import CPU
 from .data import read_rom
 from .gpu_display import GPUDisplay
 from .memory import Memory
+from .sound import Sound
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -18,6 +19,7 @@ if __name__ == "__main__":
     memory = Memory()
     memory.load_rom(read_rom(rom_file))
     display = GPUDisplay()
+    sound = Sound()
 
-    cpu = CPU(memory, display)
+    cpu = CPU(memory, display, sound)
     cpu.run()
