@@ -1,8 +1,12 @@
+import numpy as np
+import numpy.typing as npt
+
+
 class Display:
     def __init__(self) -> None:
         self.screen = [[False for _ in range(64)] for _ in range(32)]
 
-    def blit(self, x: int, y: int, graphic_data: bytearray) -> bool:
+    def blit(self, x: np.uint8, y: np.uint8, graphic_data: npt.NDArray[np.uint8]) -> bool:
         erased = False
         for i, b in enumerate(graphic_data):
             for j, bit in enumerate(bin(b)[2:].zfill(8)):
@@ -15,12 +19,13 @@ class Display:
                     erased = True
         return erased
 
-    def clear(self):
+    def clear(self) -> None:
         self.screen = [[False for _ in range(64)] for _ in range(32)]
 
+    def show(self) -> None:
+        print(self)  # noqa: T201
+
     def __str__(self) -> str:
-        lines = [
-            "+" + "".join("█" if e else " " for e in row) + "+" for row in self.screen
-        ]
+        lines = ["+" + "".join("█" if e else " " for e in row) + "+" for row in self.screen]
         top_bot = ["+" * len(lines[0])]
         return "\n".join(top_bot + lines + top_bot)
