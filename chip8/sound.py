@@ -15,6 +15,9 @@ class Sound:
     def play(self, value: int) -> None:
         self.queue.put_nowait(value)
 
+    def close(self) -> None:
+        self.queue.put_nowait(-1)
+
     def sound_loop_task(self) -> None:
         wf: wave.Wave_read = wave.open("./sound/chirp.wav")
         p = pyaudio.PyAudio()

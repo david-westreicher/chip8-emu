@@ -1,14 +1,19 @@
 import argparse
 import logging
+import time
 from pathlib import Path
+
+from chip8.debug import DebugInformation, DebugPipe
 
 from .cpu import CPU
 from .data import read_rom
-from .gpu_display import GPUDisplay
+from .graphics import Display
 from .memory import Memory
 from .sound import Sound
 
 logging.basicConfig(level=logging.WARNING)
+
+TICKS_PER_SECOND = 200
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run rom")
@@ -18,8 +23,23 @@ if __name__ == "__main__":
     rom_file: Path = args.rom
     memory = Memory()
     memory.load_rom(read_rom(rom_file))
-    display = GPUDisplay()
+    debug_pipe = DebugPipe()
+    debug_info = DebugInformation.create_process_synced()
+    display = Display(debug_info, debug_pipe)
     sound = Sound()
+    cpu = CPU(memory, display, sound, debug_info, debug_pipe)
 
-    cpu = CPU(memory, display, sound)
-    cpu.run()
+    while True:
+        if -1 in display.pressed_buttons():
+            break
+        debug_pipe.fetch_messages()
+        if not debug_pipe.paused or debug_pipe.open_steps():
+            cpu.tick()
+        if debug_pipe.should_reset():
+            cpu.reset()
+            display.clear()
+            cpu.tick()
+        time.sleep(1 / TICKS_PER_SECOND)
+
+    sound.close()
+    display.close()

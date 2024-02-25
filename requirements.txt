@@ -2,3 +2,4 @@ pytest==8.0.1
 moderngl==5.10.0
 moderngl-window==2.4.5
 PyAudio==0.2.14
+imgui==2.0.0

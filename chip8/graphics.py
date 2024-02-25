@@ -5,24 +5,34 @@ from multiprocessing import Process, Queue
 from multiprocessing.shared_memory import SharedMemory
 from typing import Any
 
+import imgui
 import moderngl
 import moderngl_window as mglw
+import numpy as np
+import numpy.typing as npt
 from moderngl_window.context.base import KeyModifiers
+from moderngl_window.integrations.imgui import ModernglWindowRenderer
 
 from .constants import HEIGHT, WIDTH
-from .display import Display
+from .debug import DebugInformation, DebugPipe
 
 shared_vram = SharedMemory(name="shared_vram", create=True, size=WIDTH * HEIGHT * 3)
 keypress_queue: "Queue[tuple[int, str]]" = Queue()
+debug_info: DebugInformation = DebugInformation()
+debug_pipe = DebugPipe()
 
 
 class GPUDisplayWindow(mglw.WindowConfig):
     gl_version = (3, 3)
     title = "chip8-emu"
     window_size = (1280, 720)
+    aspect_ratio = None
 
     def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401
         super().__init__(**kwargs)
+        imgui.create_context()
+        self.show_debug = False
+        self.imgui = ModernglWindowRenderer(self.wnd)
         self.program = self.ctx.program(
             vertex_shader="""
                     #version 330
@@ -59,12 +69,61 @@ class GPUDisplayWindow(mglw.WindowConfig):
 
     def render(self, time: float, frame_time: float) -> None:  # noqa: ARG002
         self.ctx.clear(0.0, 0.0, 0.0)
-
         self.texture.write(shared_vram.buf)
         self.texture.use()
         self.quad.render(moderngl.TRIANGLE_STRIP)
+        if self.show_debug:
+            self.render_ui()
 
-    def key_event(self, key: int, action: str, modifiers: KeyModifiers) -> None:  # noqa: ARG002
+    def render_ui(self) -> None:
+        imgui.new_frame()
+
+        imgui.begin("Debug", True)
+        imgui.text(f"PC {debug_info.get_register_pc()}")
+        imgui.text(f"OP {debug_info.get_instruction()}")
+        imgui.text(f"I  {debug_info.get_register_i()}")
+        imgui.text(f"DT {debug_info.get_register_dt()}")
+        imgui.text(debug_info.get_data_registers())
+        if debug_pipe.paused:
+            if imgui.button("Continue"):
+                debug_pipe.continue_()
+        elif imgui.button("Pause"):
+            debug_pipe.pause()
+        if imgui.button("Reset"):
+            debug_pipe.reset()
+        if imgui.button("Step"):
+            debug_pipe.step()
+        imgui.end()
+
+        imgui.render()
+        self.imgui.render(imgui.get_draw_data())
+
+    def resize(self, width: int, height: int) -> None:
+        self.imgui.resize(width, height)
+
+    def mouse_position_event(self, x: int, y: int, dx: int, dy: int) -> None:
+        self.imgui.mouse_position_event(x, y, dx, dy)
+
+    def mouse_drag_event(self, x: int, y: int, dx: int, dy: int) -> None:
+        self.imgui.mouse_drag_event(x, y, dx, dy)
+
+    def mouse_scroll_event(self, x_offset: float, y_offset: float) -> None:
+        self.imgui.mouse_scroll_event(x_offset, y_offset)
+
+    def mouse_press_event(self, x: int, y: int, button: int) -> None:
+        self.imgui.mouse_press_event(x, y, button)
+
+    def mouse_release_event(self, x: int, y: int, button: int) -> None:
+        self.imgui.mouse_release_event(x, y, button)
+
+    def unicode_char_entered(self, char: str) -> None:
+        self.imgui.unicode_char_entered(char)
+
+    def key_event(self, key: int, action: str, modifiers: KeyModifiers) -> None:
+        self.imgui.key_event(key, action, modifiers)
+        if key == self.wnd.keys.SPACE and action == self.wnd.keys.ACTION_PRESS:
+            self.show_debug = not self.show_debug
+
         key_map = {
             self.wnd.keys.NUMBER_0: 0,
             self.wnd.keys.NUMBER_1: 1,
@@ -92,19 +151,26 @@ class GPUDisplayWindow(mglw.WindowConfig):
             self.wnd.close()
 
 
-def start_renderer_blocking() -> None:
+def start_renderer_blocking(
+    debug_info_from_main_process: DebugInformation,
+    debug_pipe_from_main_process: DebugPipe,
+) -> None:
     sys.argv = sys.argv[:1]
+    global debug_info, debug_pipe  # noqa: PLW0603
+    debug_info = debug_info_from_main_process
+    debug_pipe = debug_pipe_from_main_process
     mglw.run_window_config(GPUDisplayWindow)  # type:ignore[]
     shared_vram.close()
     shared_vram.unlink()
 
 
-class GPUDisplay(Display):
-    def __init__(self) -> None:
-        super().__init__()
-        p = Process(target=start_renderer_blocking)
-        p.start()
+class Display:
+    def __init__(self, debug_info: DebugInformation, debug_pipe: DebugPipe) -> None:
+        self.screen = [[False for _ in range(WIDTH)] for _ in range(HEIGHT)]
         self.button_state: dict[int, str] = {}
+
+        p = Process(target=start_renderer_blocking, args=[debug_info, debug_pipe])
+        p.start()
 
     def show(self) -> None:
         i = 0
@@ -124,5 +190,26 @@ class GPUDisplay(Display):
             self.button_state[key] = action
         return {k for k, a in self.button_state.items() if a == "ACTION_PRESS"}
 
+    def blit(self, x: np.uint8, y: np.uint8, graphic_data: npt.NDArray[np.uint8]) -> bool:
+        erased = False
+        for i, b in enumerate(graphic_data):
+            for j, bit in enumerate(bin(b)[2:].zfill(8)):
+                y_coord = (y + i) % len(self.screen)
+                x_coord = (x + j) % len(self.screen[0])
+                before = self.screen[y_coord][x_coord]
+                self.screen[y_coord][x_coord] ^= bit == "1"
+                now = self.screen[y_coord][x_coord]
+                if before and not now:
+                    erased = True
+        return erased
+
+    def clear(self) -> None:
+        self.screen = [[False for _ in range(64)] for _ in range(32)]
+
     def close(self) -> None:
         shared_vram.close()
+
+    def __str__(self) -> str:
+        lines = ["+" + "".join("█" if e else " " for e in row) + "+" for row in self.screen]
+        top_bot = ["+" * len(lines[0])]
+        return "\n".join(top_bot + lines + top_bot)

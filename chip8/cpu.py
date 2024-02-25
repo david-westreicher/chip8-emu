@@ -3,46 +3,64 @@
 
 import logging
 import random
-import time
 
 import numpy as np
 
-from .display import Display
+from .debug import DebugInformation, DebugPipe
+from .graphics import Display
 from .memory import MEMORY_START_ROM, Memory
 from .sound import Sound
 from .utils import display_bytes, read_address, read_byte, read_half_byte
 
-TICKS_PER_SECOND = 200
-
 
 class CPU:
-    def __init__(self, memory: Memory, display: Display, sound: Sound) -> None:
+    def __init__(  # noqa: PLR0913
+        self,
+        memory: Memory,
+        display: Display,
+        sound: Sound,
+        debug_info: DebugInformation,
+        debug_pipe: DebugPipe,
+    ) -> None:
         self.memory = memory
         self.display = display
         self.sound = sound
-        self.running = True
+        self.debug_info = debug_info
+        self.debug_pipe = debug_pipe
 
         self.data_registers = np.asarray([0] * 16, np.uint8)
         self.register_I = np.uint16(0)  # 12 bits
         self.register_DT = np.uint8(0)  # 12 bits
         self.register_PC = np.uint16(MEMORY_START_ROM)  # 12 bits
         self.stack: list[np.uint16] = []
-        np.seterr(over="ignore")
+        self.wait_for_input_reg: str = ""
 
-    def run(self) -> None:
-        while self.running:
-            operation = self.fetch()
-            logging.info(self)
-            logging.info(("Operation", hex(operation)[2:].zfill(4)))
-            self.display.show()
-            self.pressed_buttons = self.display.pressed_buttons()
-            if -1 in self.pressed_buttons:
-                self.sound.play(-1)
-                self.running = False
+    def tick(self) -> None:
+        operation = self.fetch()
+        logging.info(self)
+        logging.info(("Operation", hex(operation)[2:].zfill(4)))
+        self.pressed_buttons = self.display.pressed_buttons()
+        self.debug_info.update(
+            int(operation),
+            int(self.register_I),
+            int(self.register_DT),
+            int(self.register_PC),
+            [int(v) for v in self.data_registers],
+            [int(v) for v in self.stack],
+        )
+        if self.wait_for_input_reg:
+            if not self.pressed_buttons:
+                return
+            val = np.uint8(next(iter(self.pressed_buttons)))
+            self.set_register(self.wait_for_input_reg, val)
+            self.register_PC += np.uint16(2)
+            self.wait_for_input_reg = ""
+        else:
             self.execute(operation)
-            if self.register_DT > 0:
-                self.register_DT -= np.uint8(1)
-            time.sleep(1 / TICKS_PER_SECOND)
+        self.display.show()
+
+        if self.register_DT > 0:
+            self.register_DT -= np.uint8(1)
 
     def fetch(self) -> np.uint16:
         return self.memory.read_op(self.register_PC)
@@ -220,9 +238,8 @@ class CPU:
                 self.set_register(vx, value)
                 self.register_PC += np.uint16(2)
             case ("f", vx, "0", "a"):
-                value = self.wait_for_and_parse_input()
-                self.set_register(vx, value)
-                self.register_PC += np.uint16(2)
+                # Fx0A - LD Vx, K                           - Wait for a key press, store the value of the key in Vx.
+                self.wait_for_input_reg = vx
             case ("f", vx, "1", "5"):
                 # Fx15 - LD DT, Vx                          - Set delay timer = Vx.
                 self.register_DT = self.get_register(vx)
@@ -272,20 +289,18 @@ class CPU:
         register_num = int(reg, 16)
         return self.data_registers[register_num]
 
-    def wait_for_and_parse_input(self) -> np.uint8:
-        while not self.pressed_buttons:
-            self.pressed_buttons = self.display.pressed_buttons()
-            if -1 in self.pressed_buttons:
-                self.sound.play(-1)
-                self.running = False
-            time.sleep(1 / TICKS_PER_SECOND)
-        val = next(iter(self.pressed_buttons))
-        return np.uint8(val)
-
     def set_register(self, reg: str, data: np.uint8) -> None:
         assert 0 <= data < 2**8
         register_num = int(reg, 16)
         self.data_registers[register_num] = data
+
+    def reset(self) -> None:
+        self.data_registers.fill(np.uint8(0))
+        self.register_I = np.uint16(0)
+        self.register_DT = np.uint8(0)
+        self.register_PC = np.uint16(MEMORY_START_ROM)
+        self.stack.clear()
+        self.wait_for_input_reg = ""
 
     def __str__(self) -> str:
         return f"PC: {self.register_PC, hex(self.register_PC)}, I: {self.register_I}, regs: {display_bytes(self.data_registers)}"  # noqa: E501
