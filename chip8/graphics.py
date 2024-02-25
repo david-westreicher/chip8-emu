@@ -3,7 +3,7 @@ import sys
 from array import array
 from multiprocessing import Process, Queue
 from multiprocessing.shared_memory import SharedMemory
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import imgui
 import moderngl
@@ -20,6 +20,12 @@ shared_vram = SharedMemory(name="shared_vram", create=True, size=WIDTH * HEIGHT 
 keypress_queue: "Queue[tuple[int, str]]" = Queue()
 debug_info: DebugInformation = DebugInformation()
 debug_pipe = DebugPipe()
+
+if TYPE_CHECKING:
+    from unittest.mock import Mock
+
+    imgui = Mock()
+    assert type(imgui) is Mock
 
 
 class GPUDisplayWindow(mglw.WindowConfig):
@@ -78,7 +84,7 @@ class GPUDisplayWindow(mglw.WindowConfig):
     def render_ui(self) -> None:
         imgui.new_frame()
 
-        imgui.begin("Debug", True)
+        imgui.begin("Debug")
         imgui.text(f"PC {debug_info.get_register_pc()}")
         imgui.text(f"OP {debug_info.get_instruction()}")
         imgui.text(f"I  {debug_info.get_register_i()}")

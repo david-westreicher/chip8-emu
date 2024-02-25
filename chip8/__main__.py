@@ -3,14 +3,16 @@ import logging
 import time
 from pathlib import Path
 
-from chip8.debug import DebugInformation, DebugPipe
+import numpy as np
 
 from .cpu import CPU
 from .data import read_rom
+from .debug import DebugInformation, DebugPipe
 from .graphics import Display
 from .memory import Memory
 from .sound import Sound
 
+np.seterr(over="ignore")
 logging.basicConfig(level=logging.WARNING)
 
 TICKS_PER_SECOND = 200
